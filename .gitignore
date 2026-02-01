@@ -17,3 +17,6 @@ docs/
 # Node/React node_modules
 node_modules/
 uploads/
+
+# Other files
+.github/

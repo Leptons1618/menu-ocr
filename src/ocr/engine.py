@@ -27,16 +27,28 @@ class OCREngine:
     def _clean_text(self, text: str) -> str:
         """Clean OCR text - fix common errors."""
         # Fix common OCR errors
-        replacements = [
-            # Price-like patterns that got corrupted
-            (r'\bo{2,}\b', lambda m: '0' * len(m.group())),  # ooo -> 000
-            (r'\bO{2,}\b', lambda m: '0' * len(m.group())),  # OOO -> 000
-            (r'\bl{2,}\b', lambda m: '1' * len(m.group())),  # lll -> 111
-            (r'\bI{2,}\b', lambda m: '1' * len(m.group())),  # III -> 111
-        ]
+        # Price patterns with Os instead of 0s
+        text = re.sub(r'\bo{2,}\b', lambda m: '0' * len(m.group()), text)
+        text = re.sub(r'\bO{2,}\b', lambda m: '0' * len(m.group()), text)
         
-        for pattern, repl in replacements:
-            text = re.sub(pattern, repl, text)
+        # Mixed O/0 in prices (e.g., "1O00" -> "1000")
+        text = re.sub(r'(\d)[oO](\d)', r'\g<1>0\2', text)
+        text = re.sub(r'(\d)[oO](\d)', r'\g<1>0\2', text)  # Apply twice for "1OOO"
+        text = re.sub(r'(\d)[oO](\d)', r'\g<1>0\2', text)  # Apply thrice
+        
+        # I/l as 1 in numbers
+        text = re.sub(r'(\d)[Il](\d)', r'\g<1>1\2', text)
+        text = re.sub(r'(\d)[Il](\d)', r'\g<1>1\2', text)
+        
+        # J as digit (JJooo -> 11000)
+        text = re.sub(r'^[Jj]+[oO]+$', lambda m: m.group().replace('J', '1').replace('j', '1').replace('o', '0').replace('O', '0'), text)
+        
+        # Fix brackets in prices
+        text = re.sub(r'(\d+)[}\]]', r'\1', text)
+        text = re.sub(r'[{\[](\d+)', r'\1', text)
+        
+        # Fix "l" at start of numbers
+        text = re.sub(r'^[lI](\d{2,})$', r'1\1', text)
         
         return text.strip()
     

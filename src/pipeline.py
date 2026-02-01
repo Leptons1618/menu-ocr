@@ -26,7 +26,7 @@ class PipelineConfig:
     """Pipeline configuration."""
     use_gpu: bool = False
     lang: str = "en"
-    confidence_threshold: float = 0.3
+    confidence_threshold: float = 0.2  # Lower threshold for better recall
     model_path: Optional[Path] = None
 
 
@@ -77,14 +77,15 @@ def extract_price(text: str) -> Optional[float]:
     return None
 
 
-def are_horizontally_aligned(bbox1: BoundingBox, bbox2: BoundingBox, tolerance: float = 0.5) -> bool:
-    """Check if two boxes are on the same line."""
+def are_horizontally_aligned(bbox1: BoundingBox, bbox2: BoundingBox, tolerance: float = 1.0) -> bool:
+    """Check if two boxes are on the same line with improved tolerance."""
     h1 = bbox1.height
     h2 = bbox2.height
     
     y1_mid = (bbox1.y_min + bbox1.y_max) / 2
     y2_mid = (bbox2.y_min + bbox2.y_max) / 2
     
+    # Use larger tolerance for better matching
     threshold = max(h1, h2) * tolerance
     return abs(y1_mid - y2_mid) < threshold
 
@@ -92,13 +93,14 @@ def are_horizontally_aligned(bbox1: BoundingBox, bbox2: BoundingBox, tolerance: 
 def find_price_for_item(
     item_ct: ClassifiedText, 
     all_classified: list[ClassifiedText],
-    used_prices: set[int]
+    used_prices: set[int],
+    img_width: float = 1000
 ) -> Optional[float]:
-    """Find the best price for an item based on spatial proximity."""
+    """Find the best price for an item using multiple strategies."""
     item_bbox = item_ct.bbox
     
     best_price = None
-    best_dist = float('inf')
+    best_score = float('inf')
     best_idx = -1
     
     for i, ct in enumerate(all_classified):
@@ -108,18 +110,34 @@ def find_price_for_item(
             continue
         
         price_bbox = ct.bbox
+        price_val = extract_price(ct.text)
+        if not price_val:
+            continue
         
-        # Check if horizontally aligned (same line)
-        if are_horizontally_aligned(item_bbox, price_bbox):
-            # Price should be to the right of item
-            if price_bbox.x_min > item_bbox.x_max - item_bbox.width * 0.5:
-                dist = price_bbox.x_min - item_bbox.x_max
-                if 0 < dist < best_dist:
-                    price_val = extract_price(ct.text)
-                    if price_val:
-                        best_dist = dist
-                        best_price = price_val
-                        best_idx = i
+        # Strategy 1: Same row (horizontally aligned), price to the right
+        if are_horizontally_aligned(item_bbox, price_bbox, tolerance=1.0):
+            if price_bbox.x_min > item_bbox.x_min:
+                # Score based on Y alignment (lower is better)
+                y_diff = abs((item_bbox.y_min + item_bbox.y_max) / 2 - 
+                           (price_bbox.y_min + price_bbox.y_max) / 2)
+                score = y_diff
+                if score < best_score:
+                    best_score = score
+                    best_price = price_val
+                    best_idx = i
+        
+        # Strategy 2: Price in rightmost column (common menu layout)
+        # If price is in right 30% of image and roughly aligned
+        if price_bbox.x_min > img_width * 0.6:
+            y_diff = abs((item_bbox.y_min + item_bbox.y_max) / 2 - 
+                       (price_bbox.y_min + price_bbox.y_max) / 2)
+            # Allow more vertical tolerance for column-based layouts
+            if y_diff < max(item_bbox.height, price_bbox.height) * 1.5:
+                score = y_diff + 10  # Slight penalty vs direct alignment
+                if score < best_score:
+                    best_score = score
+                    best_price = price_val
+                    best_idx = i
     
     if best_idx >= 0:
         used_prices.add(best_idx)
@@ -178,7 +196,7 @@ class MenuPipeline:
         )
         
         # Step 3: Build structure with spatial matching
-        document = self._build_menu(classified)
+        document = self._build_menu(classified, img_w)
         
         return PipelineResult(
             document=document,
@@ -187,7 +205,7 @@ class MenuPipeline:
             processing_time_ms=(time.time() - start) * 1000
         )
     
-    def _build_menu(self, classified: list[ClassifiedText]) -> MenuDocument:
+    def _build_menu(self, classified: list[ClassifiedText], img_width: float = 1000) -> MenuDocument:
         """Build menu structure from classified text with spatial price matching."""
         sections: list[MenuSection] = []
         current_section: Optional[MenuSection] = None
@@ -229,7 +247,7 @@ class MenuPipeline:
                     current_section = MenuSection(id="menu", label="Menu")
                 
                 # Find price spatially
-                price = find_price_for_item(ct, classified, used_prices)
+                price = find_price_for_item(ct, classified, used_prices, img_width)
                 
                 # Also check if price is in the text
                 if not price:

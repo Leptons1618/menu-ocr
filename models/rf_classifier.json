@@ -1,0 +1,6 @@
+{
+  "model_type": "random_forest",
+  "accuracy": 0.9094631483166515,
+  "train_time": 0.34314608573913574,
+  "n_samples": 10987
+}

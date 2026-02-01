@@ -1,0 +1,6 @@
+{
+  "model_type": "mlp",
+  "accuracy": 0.8557779799818016,
+  "train_time": 7.033896207809448,
+  "n_samples": 10987
+}

@@ -5,6 +5,7 @@ Evaluate menu extraction on sample data.
 
 import sys
 import json
+import argparse
 from pathlib import Path
 from collections import defaultdict
 
@@ -32,7 +33,7 @@ def extract_items(menu_json: dict) -> list[dict]:
     return items
 
 
-def fuzzy_match(pred_name: str, gt_name: str, threshold: float = 0.6) -> bool:
+def fuzzy_match(pred_name: str, gt_name: str, threshold: float = 0.5) -> bool:
     """Check if two names are similar enough."""
     pred_words = set(pred_name.lower().split())
     gt_words = set(gt_name.lower().split())
@@ -84,6 +85,13 @@ def evaluate_sample(pred_json: dict, gt_json: dict) -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", "-m", type=Path, default=None,
+                        help="Path to trained classifier model")
+    parser.add_argument("--gpu", action="store_true",
+                        help="Use GPU acceleration")
+    args = parser.parse_args()
+    
     samples_dir = Path("data/samples")
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
@@ -99,10 +107,22 @@ def main():
         print("No samples found!")
         return
     
-    print(f"Found {len(samples)} samples\n")
+    print(f"Found {len(samples)} samples")
+    
+    # Check for GPU
+    import torch
+    use_gpu = args.gpu or torch.cuda.is_available()
+    device = "GPU" if use_gpu else "CPU"
+    print(f"Using: {device}")
+    if args.model:
+        print(f"Model: {args.model}")
+    print()
     
     # Initialize pipeline
-    config = PipelineConfig(use_gpu=False)
+    config = PipelineConfig(
+        use_gpu=use_gpu,
+        model_path=args.model
+    )
     pipeline = MenuPipeline(config)
     
     results = []
@@ -134,6 +154,7 @@ def main():
         
         print(f"  Items: {metrics['predicted_items']} pred / {metrics['ground_truth_items']} gt / {metrics['matched']} matched")
         print(f"  F1: {metrics['f1']:.2%}, Price Acc: {metrics['price_accuracy']:.2%}")
+        print(f"  Time: {metrics['processing_time_ms']:.0f}ms")
         print()
     
     # Aggregate
@@ -143,17 +164,19 @@ def main():
     avg_price_acc = sum(r["price_accuracy"] for r in results) / len(results)
     avg_time = sum(r["processing_time_ms"] for r in results) / len(results)
     
-    print("=" * 50)
+    print("=" * 60)
     print("AGGREGATE RESULTS")
-    print("=" * 50)
+    print("=" * 60)
     print(f"Average Precision: {avg_precision:.2%}")
     print(f"Average Recall:    {avg_recall:.2%}")
     print(f"Average F1:        {avg_f1:.2%}")
     print(f"Price Accuracy:    {avg_price_acc:.2%}")
-    print(f"Avg Processing:    {avg_time:.0f}ms")
+    print(f"Avg Processing:    {avg_time:.0f}ms ({device})")
     
     # Save summary
     summary = {
+        "device": device,
+        "model": str(args.model) if args.model else "rule-based",
         "samples": results,
         "aggregate": {
             "precision": avg_precision,

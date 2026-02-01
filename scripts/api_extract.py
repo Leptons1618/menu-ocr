@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
 API extraction script for web backend.
+Uses GPU by default if available.
 """
 
 import sys
-import json
 import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import torch
 from src.pipeline import MenuPipeline, PipelineConfig
 
 
@@ -19,11 +20,15 @@ def main():
     parser.add_argument("--output-json", required=True, type=Path)
     parser.add_argument("--output-image", required=True, type=Path)
     parser.add_argument("--model", type=Path, default=None)
+    parser.add_argument("--no-gpu", action="store_true", help="Disable GPU")
     args = parser.parse_args()
+    
+    # Use GPU if available
+    use_gpu = torch.cuda.is_available() and not args.no_gpu
     
     # Create pipeline
     config = PipelineConfig(
-        use_gpu=False,
+        use_gpu=use_gpu,
         model_path=args.model
     )
     pipeline = MenuPipeline(config)
@@ -40,8 +45,8 @@ def main():
     args.output_image.parent.mkdir(parents=True, exist_ok=True)
     pipeline.visualize(args.image, result, args.output_image)
     
-    print(f"Extracted {len(result.ocr_results)} text elements")
-    print(f"Processing time: {result.processing_time_ms:.1f}ms")
+    device = "GPU" if use_gpu else "CPU"
+    print(f"[{device}] Extracted {len(result.ocr_results)} text elements in {result.processing_time_ms:.0f}ms")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+{
+  "model_type": "xgboost",
+  "accuracy": 0.9117379435850773,
+  "train_time": 2.566321611404419,
+  "n_samples": 10987
+}

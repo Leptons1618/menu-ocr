@@ -12,6 +12,8 @@ wheels/
 # Training Data and test results
 data/
 output/
+docs/
 
 # Node/React node_modules
 node_modules/
+uploads/

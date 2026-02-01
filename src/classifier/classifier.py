@@ -77,10 +77,24 @@ class MenuClassifier:
     def __init__(self, model_path: Optional[Path] = None):
         """Initialize classifier."""
         self.model = None
+        self.label_encoder = None
         self.is_trained = False
         
         if model_path and Path(model_path).exists():
             self.load(model_path)
+    
+    def _map_cord_label(self, label_str: str) -> TextElementType:
+        """Map CORD/training labels to TextElementType."""
+        mapping = {
+            'item_name': TextElementType.ITEM_NAME,
+            'item_price': TextElementType.ITEM_PRICE,
+            'metadata': TextElementType.METADATA,
+            'other': TextElementType.OTHER,
+            'section_header': TextElementType.SECTION_HEADER,
+            'group_header': TextElementType.GROUP_HEADER,
+            'item_description': TextElementType.ITEM_DESCRIPTION,
+        }
+        return mapping.get(label_str.lower(), TextElementType.OTHER)
     
     def extract_features(
         self,
@@ -185,9 +199,19 @@ class MenuClassifier:
         if self.is_trained and self.model is not None:
             # Use trained model
             X = features.to_array().reshape(1, -1)
-            pred = self.model.predict(X)[0]
+            pred_idx = self.model.predict(X)[0]
             proba = self.model.predict_proba(X)[0]
-            label = TextElementType(pred)
+            
+            # Convert prediction to label
+            if self.label_encoder is not None:
+                label_str = self.label_encoder.inverse_transform([pred_idx])[0]
+                label = self._map_cord_label(label_str)
+            else:
+                try:
+                    label = TextElementType(pred_idx)
+                except ValueError:
+                    label = TextElementType.OTHER
+            
             confidence = float(max(proba))
         else:
             # Use rule-based
@@ -249,5 +273,6 @@ class MenuClassifier:
         """Load model from disk."""
         with open(path, 'rb') as f:
             data = pickle.load(f)
-        self.model = data['model']
+        self.model = data.get('model') or data.get('classifier')
+        self.label_encoder = data.get('label_encoder')
         self.is_trained = True

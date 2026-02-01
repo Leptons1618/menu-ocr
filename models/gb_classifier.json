@@ -1,0 +1,6 @@
+{
+  "model_type": "gradient_boost",
+  "accuracy": 0.910828025477707,
+  "train_time": 20.032275199890137,
+  "n_samples": 10987
+}

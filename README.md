@@ -152,5 +152,4 @@ If you use this work, please cite:
 ```
 
 ## License
-
-MIT
+MIT License © 2026 Anish Giri

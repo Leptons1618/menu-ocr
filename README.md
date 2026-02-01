@@ -201,8 +201,8 @@ If you use this work, please cite:
 ```bibtex
 @misc{menuocr2024,
   title={Menu OCR: A Modular Pipeline for Structured Menu Extraction},
-  author={Menu OCR Research Team},
-  year={2024}
+  author={Anish Giri}
+  year={2026}
 }
 ```
 

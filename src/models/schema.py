@@ -15,6 +15,11 @@ class BoundingBox(BaseModel):
     x_max: float
     y_max: float
     
+    # Extended spatial metadata
+    polygon: Optional[list[tuple[float, float]]] = None  # Full polygon for rotated text
+    rotation_degrees: float = 0.0
+    baseline_y: Optional[float] = None  # For vertical alignment
+    
     @property
     def width(self) -> float:
         return self.x_max - self.x_min
@@ -30,6 +35,20 @@ class BoundingBox(BaseModel):
     @property
     def area(self) -> float:
         return self.width * self.height
+    
+    def overlaps_horizontally(self, other: "BoundingBox", tolerance: float = 0.5) -> bool:
+        """Check if boxes are on the same line (horizontal overlap)."""
+        self_y_center = (self.y_min + self.y_max) / 2
+        other_y_center = (other.y_min + other.y_max) / 2
+        max_height = max(self.height, other.height)
+        return abs(self_y_center - other_y_center) < max_height * tolerance
+    
+    def distance_to(self, other: "BoundingBox") -> float:
+        """Calculate Euclidean distance between box centers."""
+        import math
+        dx = self.center[0] - other.center[0]
+        dy = self.center[1] - other.center[1]
+        return math.sqrt(dx * dx + dy * dy)
 
 
 class TextElementType(str, Enum):
@@ -48,6 +67,11 @@ class OCRResult(BaseModel):
     text: str
     bbox: BoundingBox
     confidence: float = 1.0
+    
+    # Extended OCR metadata
+    detection_confidence: Optional[float] = None  # Separate from recognition
+    char_confidences: Optional[list[float]] = None  # Per-character confidence
+    alternatives: Optional[list[str]] = None  # Top-k recognition hypotheses
     
     class Config:
         frozen = True

@@ -1,6 +1,7 @@
 """
 Enhanced text classifier for menu elements.
 Supports rule-based, ML-based, and hybrid approaches.
+ML models serve as secondary signals, not primary decision makers.
 """
 
 import re
@@ -42,6 +43,11 @@ class LayoutFeatures:
     is_price_only: bool
     has_category_word: bool
     
+    # Extended features for hierarchy
+    font_level: int = 2  # 0=largest, higher=smaller
+    column_index: int = 0
+    is_price_column: bool = False
+    
     def to_array(self) -> np.ndarray:
         """Convert to numpy array for ML."""
         return np.array([
@@ -54,31 +60,61 @@ class LayoutFeatures:
         ])
 
 
-class MenuClassifier:
+class HybridClassifier:
     """
-    Classifier for menu text elements.
+    Hybrid classifier: rule-based primary, ML as secondary signal.
+    
+    ML models trained on receipt datasets underperform on menus due to
+    domain mismatch. This classifier uses rules as the primary decision
+    maker and only consults ML for low-confidence cases.
     """
     
     # Price patterns
     PRICE_PATTERNS = [
-        r'^[\$£€₹]?\s*\d+(?:[.,]\d{1,2})?\s*$',
+        r'^[\$£€₹¥]?\s*\d+(?:[.,]\d{1,2})?\s*$',
         r'^\d{2,5}$',  # Just digits (common in menus)
+        r'^(?:Rs\.?|INR)\s*\d+',
     ]
     
-    # Category keywords
+    # Section keywords
+    SECTION_WORDS = {
+        'appetizers', 'starters', 'mains', 'entrees', 'desserts',
+        'beverages', 'drinks', 'wines', 'cocktails', 'sides',
+        'breakfast', 'lunch', 'dinner', 'specials', 'soups', 'salads',
+        'seafood', 'meat', 'vegetarian', 'menu',
+    }
+    
+    # Group/category keywords
     CATEGORY_WORDS = {
         'deluxe', 'premium', 'special', 'imported', 'domestic',
         'single', 'malts', 'bourbon', 'tennessee', 'beer', 'wine',
         'rum', 'brandy', 'liqueur', 'cocktail', 'bottle', 'pint',
         'strong', 'mild', 'appetizer', 'starter', 'main', 'dessert',
         'beverage', 'drink', 'spirit', 'whiskey', 'vodka', 'gin',
+        'classic', 'house', 'signature', 'kids', 'vegetarian', 'vegan',
     }
     
-    def __init__(self, model_path: Optional[Path] = None):
-        """Initialize classifier."""
+    def __init__(
+        self,
+        model_path: Optional[Path] = None,
+        ml_confidence_threshold: float = 0.7,
+        rule_override_threshold: float = 0.85,
+    ):
+        """
+        Initialize hybrid classifier.
+        
+        Parameters:
+        -----------
+        model_path : Path to trained ML model (optional)
+        ml_confidence_threshold : Min ML confidence to consider its prediction
+        rule_override_threshold : Rule confidence above which ML is ignored
+        """
         self.model = None
         self.label_encoder = None
         self.is_trained = False
+        
+        self.ml_confidence_threshold = ml_confidence_threshold
+        self.rule_override_threshold = rule_override_threshold
         
         if model_path and Path(model_path).exists():
             self.load(model_path)
@@ -103,6 +139,9 @@ class MenuClassifier:
         idx: int,
         img_width: float = 1000,
         img_height: float = 1000,
+        font_level: int = 2,
+        column_index: int = 0,
+        is_price_column: bool = False,
     ) -> LayoutFeatures:
         """Extract features for a single OCR result."""
         text = ocr.text
@@ -134,7 +173,8 @@ class MenuClassifier:
         
         # Category detection
         text_lower = text.lower()
-        has_cat = any(w in text_lower for w in self.CATEGORY_WORDS)
+        text_words = set(text_lower.split())
+        has_cat = bool(text_words & self.CATEGORY_WORDS)
         
         return LayoutFeatures(
             rel_x=bbox.x_min / img_width,
@@ -152,38 +192,136 @@ class MenuClassifier:
             has_price=is_price,
             is_price_only=is_price_only,
             has_category_word=has_cat,
+            font_level=font_level,
+            column_index=column_index,
+            is_price_column=is_price_column,
         )
     
-    def classify_rule_based(self, features: LayoutFeatures, text: str) -> tuple[TextElementType, float]:
-        """Rule-based classification."""
+    def classify_rule_based(
+        self,
+        features: LayoutFeatures,
+        text: str,
+        lexical_priors: Optional[dict] = None,
+    ) -> tuple[TextElementType, float]:
+        """
+        Rule-based classification with lexical priors.
+        
+        Returns (label, confidence) tuple.
+        """
+        text_lower = text.lower().strip()
+        text_words = set(text_lower.split())
+        
+        # Apply lexical priors if available
+        prior_boost = {}
+        if lexical_priors:
+            prior_boost = lexical_priors
         
         # Price detection (highest priority)
-        if features.is_price_only:
+        if features.is_price_only or (features.is_price_column and features.digit_ratio > 0.4):
             return TextElementType.ITEM_PRICE, 0.95
         
         if features.has_price and features.digit_ratio > 0.5:
             return TextElementType.ITEM_PRICE, 0.90
         
-        # Section header: large, caps, big gap below
-        if (features.is_all_caps and 
-            features.rel_height > 1.3 and 
-            features.gap_below > 1.5 and
-            features.word_count <= 4):
-            return TextElementType.SECTION_HEADER, 0.85
+        # Section header detection
+        # Large font (level 0-1), possibly all caps, section keywords
+        is_section_keyword = bool(text_words & self.SECTION_WORDS)
+        section_conf = 0.0
         
-        # Group header: category word
+        if is_section_keyword and features.word_count <= 4:
+            section_conf = 0.85
+        elif features.font_level == 0 and features.word_count <= 4:
+            section_conf = 0.80
+        elif (features.is_all_caps and 
+              features.rel_height > 1.3 and 
+              features.gap_below > 1.5 and
+              features.word_count <= 4):
+            section_conf = 0.75
+        
+        section_conf += prior_boost.get(TextElementType.SECTION_HEADER, 0.0)
+        if section_conf >= 0.75:
+            return TextElementType.SECTION_HEADER, min(section_conf, 0.95)
+        
+        # Group header detection
+        # Medium font (level 1), category keywords
+        group_conf = 0.0
         if features.has_category_word and features.word_count <= 3:
-            return TextElementType.GROUP_HEADER, 0.80
+            group_conf = 0.80
+        elif features.font_level == 1 and features.word_count <= 4:
+            group_conf = 0.70
         
-        # Description: long text, not caps
+        group_conf += prior_boost.get(TextElementType.GROUP_HEADER, 0.0)
+        if group_conf >= 0.70:
+            return TextElementType.GROUP_HEADER, min(group_conf, 0.90)
+        
+        # Description: long text, not caps, smaller font
         if features.word_count > 6 and not features.is_all_caps:
-            return TextElementType.ITEM_DESCRIPTION, 0.80
+            desc_conf = 0.75 + prior_boost.get(TextElementType.ITEM_DESCRIPTION, 0.0)
+            return TextElementType.ITEM_DESCRIPTION, min(desc_conf, 0.85)
         
-        # Item name: default for text
+        # Item name: default for regular text
         if features.word_count >= 1 and features.digit_ratio < 0.5:
-            return TextElementType.ITEM_NAME, 0.70
+            name_conf = 0.70 + prior_boost.get(TextElementType.ITEM_NAME, 0.0)
+            return TextElementType.ITEM_NAME, min(name_conf, 0.85)
         
         return TextElementType.OTHER, 0.50
+    
+    def classify_hybrid(
+        self,
+        features: LayoutFeatures,
+        text: str,
+        lexical_priors: Optional[dict] = None,
+    ) -> tuple[TextElementType, float]:
+        """
+        Hybrid classification: rule-based primary, ML secondary.
+        
+        ML is only consulted when rule confidence is below threshold.
+        """
+        # Get rule-based prediction
+        rule_label, rule_conf = self.classify_rule_based(features, text, lexical_priors)
+        
+        # If rule confidence is high, use rule prediction
+        if rule_conf >= self.rule_override_threshold:
+            return rule_label, rule_conf
+        
+        # If no ML model, use rule prediction
+        if not self.is_trained or self.model is None:
+            return rule_label, rule_conf
+        
+        # Get ML prediction
+        X = features.to_array().reshape(1, -1)
+        try:
+            pred_idx = self.model.predict(X)[0]
+            proba = self.model.predict_proba(X)[0]
+            ml_conf = float(max(proba))
+            
+            if self.label_encoder is not None:
+                label_str = self.label_encoder.inverse_transform([pred_idx])[0]
+                ml_label = self._map_cord_label(label_str)
+            else:
+                ml_label = TextElementType.OTHER
+        except Exception:
+            return rule_label, rule_conf
+        
+        # Decision logic:
+        # 1. If ML agrees with rules, boost confidence
+        # 2. If ML strongly disagrees AND rule confidence is low, consider ML
+        # 3. Otherwise, trust rules
+        
+        if ml_label == rule_label:
+            # Agreement: boost confidence
+            combined_conf = min(0.95, (rule_conf + ml_conf) / 2 + 0.1)
+            return rule_label, combined_conf
+        
+        if rule_conf < 0.6 and ml_conf > self.ml_confidence_threshold:
+            # Low rule confidence, high ML confidence: consider ML
+            # But discount ML due to domain mismatch
+            discounted_ml_conf = ml_conf * 0.7
+            if discounted_ml_conf > rule_conf:
+                return ml_label, discounted_ml_conf
+        
+        # Default: trust rules
+        return rule_label, rule_conf
     
     def classify(
         self,
@@ -192,30 +330,18 @@ class MenuClassifier:
         idx: int,
         img_width: float = 1000,
         img_height: float = 1000,
+        font_level: int = 2,
+        column_index: int = 0,
+        is_price_column: bool = False,
+        lexical_priors: Optional[dict] = None,
     ) -> ClassifiedText:
-        """Classify a single OCR result."""
-        features = self.extract_features(ocr, all_ocr, idx, img_width, img_height)
+        """Classify a single OCR result using hybrid approach."""
+        features = self.extract_features(
+            ocr, all_ocr, idx, img_width, img_height,
+            font_level, column_index, is_price_column
+        )
         
-        if self.is_trained and self.model is not None:
-            # Use trained model
-            X = features.to_array().reshape(1, -1)
-            pred_idx = self.model.predict(X)[0]
-            proba = self.model.predict_proba(X)[0]
-            
-            # Convert prediction to label
-            if self.label_encoder is not None:
-                label_str = self.label_encoder.inverse_transform([pred_idx])[0]
-                label = self._map_cord_label(label_str)
-            else:
-                try:
-                    label = TextElementType(pred_idx)
-                except ValueError:
-                    label = TextElementType.OTHER
-            
-            confidence = float(max(proba))
-        else:
-            # Use rule-based
-            label, confidence = self.classify_rule_based(features, ocr.text)
+        label, confidence = self.classify_hybrid(features, ocr.text, lexical_priors)
         
         return ClassifiedText(
             ocr=ocr,
@@ -228,15 +354,30 @@ class MenuClassifier:
         ocr_results: list[OCRResult],
         img_width: float = 1000,
         img_height: float = 1000,
+        font_levels: Optional[list[int]] = None,
+        column_indices: Optional[list[int]] = None,
+        price_column_idx: Optional[int] = None,
+        lexical_priors_list: Optional[list[dict]] = None,
     ) -> list[ClassifiedText]:
-        """Classify all OCR results."""
-        return [
-            self.classify(ocr, ocr_results, i, img_width, img_height)
-            for i, ocr in enumerate(ocr_results)
-        ]
+        """Classify all OCR results with optional enrichment data."""
+        results = []
+        
+        for i, ocr in enumerate(ocr_results):
+            font_level = font_levels[i] if font_levels and i < len(font_levels) else 2
+            col_idx = column_indices[i] if column_indices and i < len(column_indices) else 0
+            is_price_col = (price_column_idx is not None and col_idx == price_column_idx)
+            lexical = lexical_priors_list[i] if lexical_priors_list and i < len(lexical_priors_list) else None
+            
+            result = self.classify(
+                ocr, ocr_results, i, img_width, img_height,
+                font_level, col_idx, is_price_col, lexical
+            )
+            results.append(result)
+        
+        return results
     
     def train(self, X: np.ndarray, y: np.ndarray, test_size: float = 0.2) -> dict:
-        """Train the classifier."""
+        """Train the ML component (used as secondary signal only)."""
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.model_selection import train_test_split
         from sklearn.metrics import classification_report, accuracy_score
@@ -267,7 +408,10 @@ class MenuClassifier:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'wb') as f:
-            pickle.dump({'model': self.model}, f)
+            pickle.dump({
+                'model': self.model,
+                'label_encoder': self.label_encoder,
+            }, f)
     
     def load(self, path: Path):
         """Load model from disk."""
@@ -276,3 +420,7 @@ class MenuClassifier:
         self.model = data.get('model') or data.get('classifier')
         self.label_encoder = data.get('label_encoder')
         self.is_trained = True
+
+
+# Backward compatibility alias
+MenuClassifier = HybridClassifier

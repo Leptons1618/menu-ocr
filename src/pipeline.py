@@ -1,6 +1,7 @@
 """
 Clean Menu OCR Pipeline.
-Single-file pipeline for menu extraction with spatial-aware item-price matching.
+Integrates column-aware layout, bipartite matching, hierarchy detection,
+and hybrid classification for improved menu extraction.
 """
 
 import json
@@ -18,7 +19,14 @@ from src.models.schema import (
     MenuGroup, MenuItem, TextElementType, BoundingBox
 )
 from src.ocr.engine import OCREngine
-from src.classifier.classifier import MenuClassifier
+from src.classifier.classifier import HybridClassifier
+from src.layout.columns import ColumnDetector, Column
+from src.layout.reading_order import ReadingOrderResolver
+from src.matching.bipartite import PriceItemMatcher
+from src.hierarchy.font_analysis import FontScaleAnalyzer
+from src.hierarchy.lexical import LexicalPriors
+from src.hierarchy.fsm import HierarchyFSM
+from src.instrumentation import PipelineInstrumentor, StageTimer
 
 
 @dataclass
@@ -28,6 +36,14 @@ class PipelineConfig:
     lang: str = "en"
     confidence_threshold: float = 0.2  # Lower threshold for better recall
     model_path: Optional[Path] = None
+    
+    # New configuration options
+    use_column_detection: bool = True
+    use_bipartite_matching: bool = True
+    use_hierarchy_fsm: bool = True
+    use_lexical_priors: bool = True
+    save_diagnostics: bool = False
+    diagnostics_dir: Optional[Path] = None
 
 
 @dataclass
@@ -38,6 +54,11 @@ class PipelineResult:
     classified: list[ClassifiedText] = field(default_factory=list)
     processing_time_ms: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    
+    # Extended results
+    columns: list[Column] = field(default_factory=list)
+    matches: dict = field(default_factory=dict)
+    trace: Optional[object] = None
     
     def to_json(self, indent: int = 2) -> str:
         """Export to JSON."""
@@ -77,95 +98,49 @@ def extract_price(text: str) -> Optional[float]:
     return None
 
 
-def are_horizontally_aligned(bbox1: BoundingBox, bbox2: BoundingBox, tolerance: float = 1.0) -> bool:
-    """Check if two boxes are on the same line with improved tolerance."""
-    h1 = bbox1.height
-    h2 = bbox2.height
-    
-    y1_mid = (bbox1.y_min + bbox1.y_max) / 2
-    y2_mid = (bbox2.y_min + bbox2.y_max) / 2
-    
-    # Use larger tolerance for better matching
-    threshold = max(h1, h2) * tolerance
-    return abs(y1_mid - y2_mid) < threshold
-
-
-def find_price_for_item(
-    item_ct: ClassifiedText, 
-    all_classified: list[ClassifiedText],
-    used_prices: set[int],
-    img_width: float = 1000
-) -> Optional[float]:
-    """Find the best price for an item using multiple strategies."""
-    item_bbox = item_ct.bbox
-    
-    best_price = None
-    best_score = float('inf')
-    best_idx = -1
-    
-    for i, ct in enumerate(all_classified):
-        if ct.label != TextElementType.ITEM_PRICE:
-            continue
-        if i in used_prices:
-            continue
-        
-        price_bbox = ct.bbox
-        price_val = extract_price(ct.text)
-        if not price_val:
-            continue
-        
-        # Strategy 1: Same row (horizontally aligned), price to the right
-        if are_horizontally_aligned(item_bbox, price_bbox, tolerance=1.0):
-            if price_bbox.x_min > item_bbox.x_min:
-                # Score based on Y alignment (lower is better)
-                y_diff = abs((item_bbox.y_min + item_bbox.y_max) / 2 - 
-                           (price_bbox.y_min + price_bbox.y_max) / 2)
-                score = y_diff
-                if score < best_score:
-                    best_score = score
-                    best_price = price_val
-                    best_idx = i
-        
-        # Strategy 2: Price in rightmost column (common menu layout)
-        # If price is in right 30% of image and roughly aligned
-        if price_bbox.x_min > img_width * 0.6:
-            y_diff = abs((item_bbox.y_min + item_bbox.y_max) / 2 - 
-                       (price_bbox.y_min + price_bbox.y_max) / 2)
-            # Allow more vertical tolerance for column-based layouts
-            if y_diff < max(item_bbox.height, price_bbox.height) * 1.5:
-                score = y_diff + 10  # Slight penalty vs direct alignment
-                if score < best_score:
-                    best_score = score
-                    best_price = price_val
-                    best_idx = i
-    
-    if best_idx >= 0:
-        used_prices.add(best_idx)
-    
-    return best_price
-
-
 class MenuPipeline:
     """
-    Clean menu extraction pipeline.
+    Enhanced menu extraction pipeline with:
+    - Column-aware layout segmentation
+    - Bipartite matching for price-item association
+    - Hierarchy detection with FSM constraints
+    - Hybrid classification (rules + ML)
     """
     
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
+        
+        # Core components
         self.ocr = OCREngine(
             lang=self.config.lang,
             use_gpu=self.config.use_gpu
         )
-        self.classifier = MenuClassifier(
+        self.classifier = HybridClassifier(
             model_path=self.config.model_path
         )
+        
+        # Layout components
+        self.column_detector = ColumnDetector() if self.config.use_column_detection else None
+        self.reading_order = ReadingOrderResolver()
+        
+        # Matching components
+        self.matcher = PriceItemMatcher() if self.config.use_bipartite_matching else None
+        
+        # Hierarchy components
+        self.font_analyzer = FontScaleAnalyzer()
+        self.lexical = LexicalPriors() if self.config.use_lexical_priors else None
+        self.fsm = HierarchyFSM() if self.config.use_hierarchy_fsm else None
     
     def process(
         self,
         image: Union[str, Path, np.ndarray, Image.Image],
     ) -> PipelineResult:
-        """Process a menu image."""
+        """Process a menu image with full pipeline."""
         start = time.time()
+        
+        # Initialize instrumentation
+        image_path = str(image) if isinstance(image, (str, Path)) else "memory"
+        instrumentor = PipelineInstrumentor(image_path, vars(self.config))
         
         # Get image dimensions
         if isinstance(image, (str, Path)):
@@ -176,48 +151,147 @@ class MenuPipeline:
         else:
             img_h, img_w = image.shape[:2]
         
-        # Step 1: OCR
+        # Stage 1: OCR
+        instrumentor.start_stage('ocr_detection')
         ocr_results = self.ocr.extract(
             image, 
             confidence_threshold=self.config.confidence_threshold
         )
+        instrumentor.end_stage('ocr_detection')
+        instrumentor.record_ocr_results(ocr_results)
         
         if not ocr_results:
+            trace = instrumentor.finalize()
             return PipelineResult(
                 document=MenuDocument(menu=[]),
-                warnings=["No text detected"]
+                warnings=["No text detected"],
+                trace=trace
             )
         
-        # Step 2: Classify
-        classified = self.classifier.classify_all(
-            ocr_results, 
-            img_width=img_w, 
-            img_height=img_h
-        )
+        # Stage 2: Column Detection
+        columns = []
+        price_col_idx = None
+        column_indices = [0] * len(ocr_results)
         
-        # Step 3: Build structure with spatial matching
-        document = self._build_menu(classified, img_w)
+        if self.column_detector:
+            instrumentor.start_stage('column_detection')
+            boxes = [r.bbox for r in ocr_results]
+            texts = [r.text for r in ocr_results]
+            
+            columns = self.column_detector.detect_columns(boxes, img_w)
+            price_col_idx = self.column_detector.detect_price_column(columns, boxes, texts)
+            
+            # Assign each box to a column
+            for i, box in enumerate(boxes):
+                column_indices[i] = self.column_detector.assign_box_to_column(box, columns)
+            
+            instrumentor.end_stage('column_detection')
+            instrumentor.record_columns(columns)
+        
+        # Stage 3: Font Analysis
+        instrumentor.start_stage('classification')
+        boxes = [r.bbox for r in ocr_results]
+        font_levels = self.font_analyzer.analyze(boxes)
+        
+        # Stage 4: Lexical Priors
+        lexical_priors = None
+        if self.lexical:
+            lexical_priors = [self.lexical.compute_prior(r.text) for r in ocr_results]
+        
+        # Stage 5: Classification with enriched features
+        classified = self.classifier.classify_all(
+            ocr_results,
+            img_width=img_w,
+            img_height=img_h,
+            font_levels=font_levels,
+            column_indices=column_indices,
+            price_column_idx=price_col_idx,
+            lexical_priors_list=lexical_priors
+        )
+        instrumentor.end_stage('classification')
+        instrumentor.record_classifications(classified)
+        
+        # Stage 6: Hierarchy FSM (optional sequence correction)
+        if self.fsm:
+            instrumentor.start_stage('hierarchy_decoding')
+            # Build observation scores from classifications
+            observations = []
+            for ct in classified:
+                obs = {t: -5.0 for t in TextElementType}
+                obs[ct.label] = np.log(max(ct.label_confidence, 0.01))
+                observations.append(obs)
+            
+            # Decode with Viterbi
+            corrected_labels = self.fsm.viterbi_decode(observations)
+            
+            # Update classifications with corrected labels
+            for i, new_label in enumerate(corrected_labels):
+                if new_label != classified[i].label:
+                    # Create new ClassifiedText with corrected label
+                    classified[i] = ClassifiedText(
+                        ocr=classified[i].ocr,
+                        label=new_label,
+                        label_confidence=classified[i].label_confidence * 0.9  # Slight penalty
+                    )
+            instrumentor.end_stage('hierarchy_decoding')
+        
+        # Stage 7: Bipartite Matching
+        matches = {}
+        if self.matcher:
+            instrumentor.start_stage('matching')
+            items = [c for c in classified if c.label == TextElementType.ITEM_NAME]
+            prices = [c for c in classified if c.label == TextElementType.ITEM_PRICE]
+            
+            # Get item/price indices in original list
+            item_indices = [i for i, c in enumerate(classified) if c.label == TextElementType.ITEM_NAME]
+            price_indices = [i for i, c in enumerate(classified) if c.label == TextElementType.ITEM_PRICE]
+            
+            if items and prices:
+                local_matches = self.matcher.match(items, prices, columns, img_w)
+                # Map back to original indices
+                for local_item_idx, local_price_idx in local_matches.items():
+                    orig_item_idx = item_indices[local_item_idx]
+                    orig_price_idx = price_indices[local_price_idx]
+                    matches[orig_item_idx] = orig_price_idx
+            
+            instrumentor.end_stage('matching')
+            instrumentor.record_matches(matches, items, prices)
+        
+        # Stage 8: Build menu structure
+        instrumentor.start_stage('structure_building')
+        document = self._build_menu_with_matches(classified, matches, columns, img_w)
+        instrumentor.end_stage('structure_building')
+        
+        trace = instrumentor.finalize()
         
         return PipelineResult(
             document=document,
             ocr_results=ocr_results,
             classified=classified,
-            processing_time_ms=(time.time() - start) * 1000
+            processing_time_ms=(time.time() - start) * 1000,
+            columns=columns,
+            matches=matches,
+            trace=trace
         )
     
-    def _build_menu(self, classified: list[ClassifiedText], img_width: float = 1000) -> MenuDocument:
-        """Build menu structure from classified text with spatial price matching."""
+    def _build_menu_with_matches(
+        self,
+        classified: list[ClassifiedText],
+        matches: dict[int, int],
+        columns: list[Column],
+        img_width: float = 1000
+    ) -> MenuDocument:
+        """Build menu structure using bipartite matching results."""
         sections: list[MenuSection] = []
         current_section: Optional[MenuSection] = None
         current_group: Optional[MenuGroup] = None
-        used_prices: set[int] = set()
         
-        for ct in classified:
+        for i, ct in enumerate(classified):
             label = ct.label
             text = ct.text.strip()
             
             if label == TextElementType.SECTION_HEADER:
-                # Save current
+                # Save current group/section
                 if current_group and current_group.items:
                     if current_section:
                         current_section.groups.append(current_group)
@@ -246,12 +320,15 @@ class MenuPipeline:
                 if not current_section:
                     current_section = MenuSection(id="menu", label="Menu")
                 
-                # Find price spatially
-                price = find_price_for_item(ct, classified, used_prices, img_width)
+                # Get price from bipartite matching
+                price = None
+                if i in matches:
+                    price_idx = matches[i]
+                    if price_idx < len(classified):
+                        price = extract_price(classified[price_idx].text)
                 
-                # Also check if price is in the text
-                if not price:
-                    # Look for price pattern at end of text
+                # Fallback: check if price embedded in text
+                if price is None:
                     match = re.search(r'\s+([\d,]+(?:\.\d{2})?)\s*$', text)
                     if match:
                         price = extract_price(match.group(1))
@@ -272,7 +349,7 @@ class MenuPipeline:
                             description=text
                         )
         
-        # Save final
+        # Save final group/section
         if current_group and current_group.items:
             if current_section:
                 current_section.groups.append(current_group)
@@ -281,46 +358,59 @@ class MenuPipeline:
         
         return MenuDocument(menu=sections)
     
+    def _build_menu(self, classified: list[ClassifiedText], img_width: float = 1000) -> MenuDocument:
+        """Legacy menu building without bipartite matching."""
+        return self._build_menu_with_matches(classified, {}, [], img_width)
+    
     def visualize(
         self,
         image_path: Union[str, Path],
         result: PipelineResult,
         output_path: Optional[Union[str, Path]] = None,
     ) -> np.ndarray:
-        """
-        Visualize OCR results with bounding boxes.
-        
-        Returns image with bounding boxes drawn.
-        """
+        """Visualize OCR results with bounding boxes."""
         img = cv2.imread(str(image_path))
         
-        # Color map for labels
         colors = {
-            TextElementType.SECTION_HEADER: (0, 0, 255),     # Red
-            TextElementType.GROUP_HEADER: (0, 165, 255),    # Orange
-            TextElementType.ITEM_NAME: (0, 255, 0),         # Green
-            TextElementType.ITEM_PRICE: (255, 0, 0),        # Blue
-            TextElementType.ITEM_DESCRIPTION: (255, 255, 0), # Cyan
-            TextElementType.METADATA: (128, 128, 128),      # Gray
-            TextElementType.OTHER: (200, 200, 200),         # Light gray
+            TextElementType.SECTION_HEADER: (0, 0, 255),
+            TextElementType.GROUP_HEADER: (0, 165, 255),
+            TextElementType.ITEM_NAME: (0, 255, 0),
+            TextElementType.ITEM_PRICE: (255, 0, 0),
+            TextElementType.ITEM_DESCRIPTION: (255, 255, 0),
+            TextElementType.METADATA: (128, 128, 128),
+            TextElementType.OTHER: (200, 200, 200),
         }
         
         for ct in result.classified:
             bbox = ct.bbox
             color = colors.get(ct.label, (200, 200, 200))
             
-            # Draw rectangle
             pt1 = (int(bbox.x_min), int(bbox.y_min))
             pt2 = (int(bbox.x_max), int(bbox.y_max))
             cv2.rectangle(img, pt1, pt2, color, 2)
             
-            # Draw label
             label_text = f"{ct.label.value[:3]}: {ct.text[:20]}"
             cv2.putText(
                 img, label_text,
                 (int(bbox.x_min), int(bbox.y_min) - 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1
             )
+        
+        # Draw match lines
+        if result.matches:
+            items = [c for c in result.classified if c.label == TextElementType.ITEM_NAME]
+            prices = [c for c in result.classified if c.label == TextElementType.ITEM_PRICE]
+            item_indices = [i for i, c in enumerate(result.classified) if c.label == TextElementType.ITEM_NAME]
+            price_indices = [i for i, c in enumerate(result.classified) if c.label == TextElementType.ITEM_PRICE]
+            
+            for orig_item_idx, orig_price_idx in result.matches.items():
+                if orig_item_idx < len(result.classified) and orig_price_idx < len(result.classified):
+                    item = result.classified[orig_item_idx]
+                    price = result.classified[orig_price_idx]
+                    
+                    item_center = (int(item.bbox.x_max), int((item.bbox.y_min + item.bbox.y_max) / 2))
+                    price_center = (int(price.bbox.x_min), int((price.bbox.y_min + price.bbox.y_max) / 2))
+                    cv2.line(img, item_center, price_center, (0, 200, 200), 1)
         
         if output_path:
             cv2.imwrite(str(output_path), img)

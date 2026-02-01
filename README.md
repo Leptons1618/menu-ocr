@@ -194,11 +194,6 @@ python scripts/error_analysis.py --output-dir output/analysis
 - GPU speedup: 3.5×
 - Supported formats: JPG, PNG, TIFF
 
-## Documentation
-
-- [Improvement Plan](docs/IMPROVEMENT_PLAN.md) - Detailed engineering roadmap
-- [Paper](paper/menu_ocr_paper.tex) - Research paper with methodology
-
 ## Citation
 
 If you use this work, please cite:

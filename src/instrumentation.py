@@ -174,7 +174,7 @@ class PipelineInstrumentor:
         self._total_start = time.time()
         
         if config:
-            config_str = json.dumps(config, sort_keys=True)
+            config_str = json.dumps(config, sort_keys=True, default=str)
             self.trace.config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:8]
     
     def start_stage(self, stage_name: str):

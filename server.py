@@ -97,8 +97,9 @@ class EnsemblePipeline:
     
     def process(self, image) -> PipelineResult:
         """Process image with ensemble."""
-        from src.pipeline import slugify, extract_price, find_price_for_item
+        from src.pipeline import slugify, extract_price
         from src.models.schema import MenuDocument, MenuSection, MenuGroup, MenuItem
+        import re
         
         start = time.time()
         
@@ -127,7 +128,6 @@ class EnsemblePipeline:
         sections = []
         current_section = None
         current_group = None
-        used_prices = set()
         
         for ct in classified:
             label = ct.label
@@ -155,7 +155,13 @@ class EnsemblePipeline:
                 if not current_section:
                     current_section = MenuSection(id="menu", label="Menu")
                 
-                price = find_price_for_item(ct, classified, used_prices)
+                # Extract price (check if embedded in text)
+                price = None
+                match = re.search(r'\s+([\d,]+(?:\.\d{2})?)\s*$', text)
+                if match:
+                    price = extract_price(match.group(1))
+                    text = text[:match.start()].strip()
+                
                 current_group.items.append(MenuItem(name=text, price=price))
         
         if current_group and current_group.items:

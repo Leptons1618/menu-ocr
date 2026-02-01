@@ -14,7 +14,7 @@
 \usetikzlibrary{shapes,arrows,positioning}
 
 \title{Menu OCR: A Modular Pipeline for Structured Menu Extraction\\with Comparative Analysis of Classification Approaches}
-\author{Menu OCR Research Team}
+\author{Anish Giri, Software Developer}
 \date{\today}
 
 \begin{document}
@@ -22,7 +22,7 @@
 \maketitle
 
 \begin{abstract}
-We present a modular pipeline for extracting structured data from restaurant menu images. Our system combines optical character recognition (OCR) with multiple classification approaches—rule-based heuristics, traditional machine learning models, and ensemble methods—to produce schema-compliant JSON output without hallucinating structure not present in the source image. We provide a comprehensive comparison of OCR backends and evaluate six classification approaches on a hand-labeled test set. Our experiments reveal that domain-specific rule-based classification outperforms general-purpose machine learning models trained on receipt datasets, achieving 35.6\% F1 score with 49\% price extraction accuracy. We analyze the causes of this performance gap and propose guidelines for production deployment.
+I present a modular pipeline for extracting structured data from restaurant menu images. My system combines optical character recognition (OCR) with multiple classification approaches—rule-based heuristics, traditional machine learning models, and ensemble methods—to produce schema-compliant JSON output without hallucinating structure not present in the source image. I provide a comprehensive comparison of OCR backends and evaluate six classification approaches on a hand-labeled test set. My experiments reveal that domain-specific rule-based classification outperforms general-purpose machine learning models trained on receipt datasets, achieving 35.6\% F1 score with 49\% price extraction accuracy. I analyze the causes of this performance gap and propose guidelines for production deployment.
 \end{abstract}
 
 \section{Introduction}
@@ -259,7 +259,7 @@ We also consider column-based layouts where prices occupy the rightmost region:
 
 \subsection{Dataset}
 
-We evaluated on two datasets:
+I evaluated on two datasets:
 
 \begin{enumerate}
     \item \textbf{CORD-v2}: 11,000 receipt images for ML training
@@ -344,7 +344,7 @@ Ensemble & 50.4\% & 27.5\% & 35.1\% & 47.2\% & 3499ms \\
 
 \subsection{Domain Mismatch}
 
-The most significant finding is that ML models trained on CORD-v2 underperform rule-based classification on menu images. We attribute this to fundamental domain differences:
+The most significant finding is that ML models trained on CORD-v2 underperform rule-based classification on menu images. I attribute this to fundamental domain differences:
 
 \begin{enumerate}
     \item \textbf{Layout Structure}: Receipts have predominantly linear, single-column layouts; menus feature multi-column layouts with visual groupings
@@ -387,7 +387,7 @@ GPU (CUDA) & 333ms & 3.5$\times$ \\
 
 \section{Recommendations}
 
-Based on our experiments, we provide the following guidelines for production deployment:
+Based on my experiments, I provide the following guidelines for production deployment:
 
 \begin{enumerate}
     \item \textbf{Use Rule-Based Classification} when training data from the target domain is unavailable
@@ -419,7 +419,7 @@ Based on our experiments, we provide the following guidelines for production dep
 
 \section{Conclusion}
 
-We presented a modular pipeline for structured menu extraction combining OCR with multiple classification approaches. Our comparative analysis demonstrates that domain-specific rule-based classification outperforms general-purpose ML models trained on out-of-domain data, achieving 35.6\% F1 score and 38.9\% price accuracy. The system processes images in 333ms with GPU acceleration and produces traceable, schema-compliant JSON output.
+I presented a modular pipeline for structured menu extraction combining OCR with multiple classification approaches. My comparative analysis demonstrates that domain-specific rule-based classification outperforms general-purpose ML models trained on out-of-domain data, achieving 35.6\% F1 score and 38.9\% price accuracy. The system processes images in 333ms with GPU acceleration and produces traceable, schema-compliant JSON output.
 
 Key contributions include:
 \begin{enumerate}

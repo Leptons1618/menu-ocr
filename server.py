@@ -30,6 +30,7 @@ from src.pipeline import MenuPipeline, PipelineConfig, PipelineResult
 UPLOAD_DIR = Path("web/uploads")
 OUTPUT_DIR = Path("web/output")
 MODELS_DIR = Path("models")
+PAPER_DIR = Path("paper")
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,6 +238,7 @@ app.add_middleware(
 # Static files
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
+app.mount("/paper", StaticFiles(directory=str(PAPER_DIR)), name="paper")
 
 
 # Response models

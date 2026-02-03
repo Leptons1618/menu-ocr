@@ -3,30 +3,65 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { extractMenu, getModels } from '../utils/api';
 import UploadZone from '../components/UploadZone';
-import { Clock, FileText, Trash2, ChevronDown, Cpu, CheckCircle, AlertCircle, Loader, X } from 'lucide-react';
+import UploadModal from '../components/UploadModal';
+import { Clock, FileText, Trash2, ChevronDown, Cpu, CheckCircle, AlertCircle, Loader, X, Play } from 'lucide-react';
+
+const MODEL_STORAGE_KEY = 'menu-ocr-selected-model';
 
 export default function UploadPage() {
   const navigate = useNavigate();
   const { state, dispatch } = useApp();
   const [models, setModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState('rule_based');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem(MODEL_STORAGE_KEY) || 'rule_based';
+  });
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const processingRef = useRef(false);
+  const processedCount = useRef(0);
+  
+  // Persist model selection
+  useEffect(() => {
+    localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+  }, [selectedModel]);
   
   useEffect(() => {
     getModels()
       .then(data => {
         setModels(data.models || []);
+        // Ensure selected model exists
+        const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+        if (stored && data.models?.some(m => m.name === stored)) {
+          setSelectedModel(stored);
+        }
       })
       .catch(err => console.warn('Could not fetch models:', err));
   }, []);
   
-  // Process queue
+  // Process queue with auto-navigation on completion
   useEffect(() => {
     const processNext = async () => {
       if (processingRef.current) return;
       
       const nextItem = state.processingQueue.find(item => item.status === 'queued');
-      if (!nextItem) return;
+      if (!nextItem) {
+        // Check if all items are completed
+        const allCompleted = state.processingQueue.length > 0 && 
+          state.processingQueue.every(item => item.status === 'completed' || item.status === 'error');
+        const hasCompletedItems = state.processingQueue.some(item => item.status === 'completed');
+        
+        if (allCompleted && hasCompletedItems && processedCount.current > 0) {
+          // Navigate to results after brief delay
+          setTimeout(() => {
+            if (state.uploads.length > 0) {
+              dispatch({ type: 'SET_CURRENT', payload: state.uploads[state.uploads.length - 1] });
+              navigate('/result');
+            }
+          }, 500);
+          processedCount.current = 0;
+        }
+        return;
+      }
       
       processingRef.current = true;
       
@@ -47,6 +82,7 @@ export default function UploadPage() {
         
         dispatch({ type: 'ADD_RESULT', payload: upload });
         dispatch({ type: 'UPDATE_QUEUE_ITEM', payload: { id: nextItem.id, status: 'completed' } });
+        processedCount.current++;
       } catch (error) {
         dispatch({ type: 'UPDATE_QUEUE_ITEM', payload: { id: nextItem.id, status: 'error', error: error.message } });
       }
@@ -55,9 +91,26 @@ export default function UploadPage() {
     };
     
     processNext();
-  }, [state.processingQueue, dispatch, selectedModel]);
+  }, [state.processingQueue, dispatch, selectedModel, navigate, state.uploads]);
   
   const handleUpload = useCallback((files) => {
+    if (files.length === 1) {
+      // Single file: process directly
+      const queueItems = [{
+        id: `${Date.now()}-0`,
+        filename: files[0].name,
+        file: files[0],
+        status: 'queued',
+      }];
+      dispatch({ type: 'ADD_TO_QUEUE', payload: queueItems });
+    } else {
+      // Multiple files: show modal
+      setPendingFiles(files);
+      setShowUploadModal(true);
+    }
+  }, [dispatch]);
+  
+  const handleProcessFiles = useCallback((files) => {
     const queueItems = files.map((file, index) => ({
       id: `${Date.now()}-${index}`,
       filename: file.name,
@@ -66,7 +119,13 @@ export default function UploadPage() {
     }));
     
     dispatch({ type: 'ADD_TO_QUEUE', payload: queueItems });
+    setShowUploadModal(false);
+    setPendingFiles([]);
   }, [dispatch]);
+  
+  const handleRemovePendingFile = useCallback((index) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
   
   const handleRemove = useCallback((id) => {
     dispatch({ type: 'REMOVE_RESULT', payload: id });
@@ -313,6 +372,19 @@ export default function UploadPage() {
             ))}
           </div>
         </div>
+      )}
+      
+      {/* Upload Modal for multiple files */}
+      {showUploadModal && pendingFiles.length > 0 && (
+        <UploadModal
+          files={pendingFiles}
+          onClose={() => {
+            setShowUploadModal(false);
+            setPendingFiles([]);
+          }}
+          onProcess={handleProcessFiles}
+          onRemoveFile={handleRemovePendingFile}
+        />
       )}
     </div>
   );

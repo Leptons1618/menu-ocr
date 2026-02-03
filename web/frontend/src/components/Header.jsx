@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { Upload, Image, GitCompare, FileText } from 'lucide-react';
+import { Upload, Image, GitCompare, FileText, BookOpen } from 'lucide-react';
 
 export default function Header() {
   return (
@@ -24,7 +24,7 @@ export default function Header() {
             className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
           >
             <Image size={16} />
-            Result
+            Results
           </NavLink>
           <NavLink 
             to="/compare" 
@@ -32,6 +32,13 @@ export default function Header() {
           >
             <GitCompare size={16} />
             Compare
+          </NavLink>
+          <NavLink 
+            to="/research" 
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+          >
+            <BookOpen size={16} />
+            Research
           </NavLink>
         </nav>
       </div>

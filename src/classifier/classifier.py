@@ -69,29 +69,64 @@ class HybridClassifier:
     maker and only consults ML for low-confidence cases.
     """
     
-    # Price patterns
+    # Enhanced price patterns (more comprehensive)
     PRICE_PATTERNS = [
         r'^[\$£€₹¥]?\s*\d+(?:[.,]\d{1,2})?\s*$',
         r'^\d{2,5}$',  # Just digits (common in menus)
-        r'^(?:Rs\.?|INR)\s*\d+',
+        r'^[\$£€₹¥]\s*\d+(?:[.,]\d{1,2})?',  # $12, ₹500, €15.50
+        r'^\d+(?:[.,]\d{1,2})?\s*[\$£€₹¥]$',  # 12$, 500₹
+        r'^(?:Rs\.?|INR|USD|EUR|GBP)\s*\d+(?:[.,]\d{1,2})?',  # Rs. 500
+        r'^\d+(?:[.,]\d{2})\s*$',  # 12.99, 500.00
+        r'^(?:MRP|Price)[:\s]*[\$£€₹¥]?\s*\d+',  # MRP: 500
+        r'^\d+\s*(?:/-|/-\s*$)',  # 500/- (Indian style)
+        r'^\d+\s*/\s*\d+',  # 500/700 (price range)
+        r'^(?:from|starting)\s*[\$£€₹¥]?\s*\d+',  # from $10
+        r'^\+?\s*[\$£€₹¥]?\s*\d+',  # +$5 (addon)
     ]
     
-    # Section keywords
+    # Section keywords (expanded)
     SECTION_WORDS = {
-        'appetizers', 'starters', 'mains', 'entrees', 'desserts',
-        'beverages', 'drinks', 'wines', 'cocktails', 'sides',
-        'breakfast', 'lunch', 'dinner', 'specials', 'soups', 'salads',
-        'seafood', 'meat', 'vegetarian', 'menu',
+        'appetizers', 'appetiser', 'starters', 'starter', 'mains', 'main course',
+        'entrees', 'entrées', 'desserts', 'dessert', 'beverages', 'beverage',
+        'drinks', 'drink', 'wines', 'wine', 'cocktails', 'cocktail', 'sides', 'side',
+        'breakfast', 'lunch', 'dinner', 'brunch', 'specials', 'special', 
+        'soups', 'soup', 'salads', 'salad', 'seafood', 'meat', 'meats',
+        'vegetarian', 'vegan', 'menu', 'carte', 'today', 'chef',
+        'tandoor', 'tandoori', 'biryani', 'biryanis', 'rice', 'rices',
+        'bread', 'breads', 'naan', 'roti', 'rotis', 'curries', 'curry',
+        'noodles', 'noodle', 'pasta', 'pastas', 'pizza', 'pizzas',
+        'burgers', 'burger', 'sandwiches', 'sandwich', 'wraps', 'wrap',
+        'sushi', 'sashimi', 'rolls', 'roll', 'combo', 'combos', 'platter', 'platters',
+        'snacks', 'snack', 'finger food', 'finger foods', 'mezze', 'tapas',
+        'hot', 'cold', 'fresh', 'signature', 'house', 'daily', 'seasonal',
+        'mocktails', 'mocktail', 'juices', 'juice', 'smoothies', 'smoothie',
+        'shakes', 'shake', 'coffee', 'tea', 'lemonade', 'refreshers',
+        'spirits', 'liquor', 'liquors', 'whiskey', 'whisky', 'vodka', 'rum',
+        'gin', 'tequila', 'brandy', 'cognac', 'beer', 'beers', 'lager', 'ale',
+        'wine list', 'by the glass', 'by the bottle',
     }
     
-    # Group/category keywords
+    # Group/category keywords (expanded)
     CATEGORY_WORDS = {
         'deluxe', 'premium', 'special', 'imported', 'domestic',
-        'single', 'malts', 'bourbon', 'tennessee', 'beer', 'wine',
-        'rum', 'brandy', 'liqueur', 'cocktail', 'bottle', 'pint',
-        'strong', 'mild', 'appetizer', 'starter', 'main', 'dessert',
-        'beverage', 'drink', 'spirit', 'whiskey', 'vodka', 'gin',
-        'classic', 'house', 'signature', 'kids', 'vegetarian', 'vegan',
+        'single', 'double', 'malts', 'malt', 'bourbon', 'tennessee', 
+        'beer', 'wine', 'rum', 'brandy', 'liqueur', 'cocktail', 
+        'bottle', 'pint', 'glass', 'pitcher', 'carafe', 'jug',
+        'strong', 'mild', 'light', 'dark', 'medium', 
+        'classic', 'house', 'signature', 'featured', 'recommended',
+        'kids', 'children', 'family', 'sharing', 'for two',
+        'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 
+        'organic', 'fresh', 'homemade', 'hand-crafted',
+        'grilled', 'fried', 'steamed', 'baked', 'roasted', 'smoked',
+        'hot', 'cold', 'iced', 'frozen', 'chilled',
+        'small', 'medium', 'large', 'regular', 'extra', 
+        'half', 'full', 'quarter', 'whole',
+        'add-ons', 'extras', 'toppings', 'sides',
+        'indian', 'chinese', 'italian', 'mexican', 'thai', 'japanese',
+        'american', 'continental', 'mediterranean', 'asian', 'european',
+        'red', 'white', 'rosé', 'sparkling', 'champagne', 'prosecco',
+        'draft', 'draught', 'bottled', 'canned', 'tap',
+        'scotch', 'irish', 'japanese', 'american', 'canadian',
     }
     
     def __init__(
@@ -116,6 +151,9 @@ class HybridClassifier:
         self.ml_confidence_threshold = ml_confidence_threshold
         self.rule_override_threshold = rule_override_threshold
         
+        # Compile regex patterns for speed
+        self._price_patterns = [re.compile(p, re.IGNORECASE) for p in self.PRICE_PATTERNS]
+        
         if model_path and Path(model_path).exists():
             self.load(model_path)
     
@@ -132,6 +170,20 @@ class HybridClassifier:
         }
         return mapping.get(label_str.lower(), TextElementType.OTHER)
     
+    def _is_price_text(self, text: str) -> bool:
+        """Check if text matches any price pattern."""
+        text_clean = text.strip()
+        return any(p.match(text_clean) for p in self._price_patterns)
+    
+    def _preprocess_text(self, text: str) -> str:
+        """Preprocess text for better matching."""
+        # Common OCR error corrections
+        text = text.replace('|', 'l')  # pipe to l
+        text = re.sub(r'[oO](?=\d)', '0', text)  # O before digit -> 0
+        text = re.sub(r'(?<=\d)[oO]', '0', text)  # O after digit -> 0
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+    
     def extract_features(
         self,
         ocr: OCRResult,
@@ -144,7 +196,7 @@ class HybridClassifier:
         is_price_column: bool = False,
     ) -> LayoutFeatures:
         """Extract features for a single OCR result."""
-        text = ocr.text
+        text = self._preprocess_text(ocr.text)
         bbox = ocr.bbox
         
         # Compute averages
@@ -167,13 +219,13 @@ class HybridClassifier:
         digit_count = sum(1 for c in text if c.isdigit())
         upper_count = sum(1 for c in text if c.isupper())
         
-        # Price detection
-        is_price = any(re.match(p, text.strip()) for p in self.PRICE_PATTERNS)
-        is_price_only = is_price and len(text.strip()) <= 10
+        # Price detection using compiled patterns
+        is_price = self._is_price_text(text)
+        is_price_only = is_price and len(text.strip()) <= 12
         
-        # Category detection
+        # Category detection (check individual words)
         text_lower = text.lower()
-        text_words = set(text_lower.split())
+        text_words = set(re.findall(r'\b\w+\b', text_lower))
         has_cat = bool(text_words & self.CATEGORY_WORDS)
         
         return LayoutFeatures(
@@ -208,60 +260,135 @@ class HybridClassifier:
         
         Returns (label, confidence) tuple.
         """
+        text = self._preprocess_text(text)
         text_lower = text.lower().strip()
-        text_words = set(text_lower.split())
+        text_words = set(re.findall(r'\b\w+\b', text_lower))
         
         # Apply lexical priors if available
         prior_boost = {}
         if lexical_priors:
             prior_boost = lexical_priors
         
-        # Price detection (highest priority)
-        if features.is_price_only or (features.is_price_column and features.digit_ratio > 0.4):
+        # PRICE DETECTION (highest priority)
+        # Check price column position first
+        if features.is_price_column and features.digit_ratio > 0.3:
             return TextElementType.ITEM_PRICE, 0.95
         
-        if features.has_price and features.digit_ratio > 0.5:
+        # Price-only text
+        if features.is_price_only:
+            return TextElementType.ITEM_PRICE, 0.95
+        
+        # High digit ratio with price pattern
+        if features.has_price and features.digit_ratio > 0.4:
             return TextElementType.ITEM_PRICE, 0.90
         
-        # Section header detection
-        # Large font (level 0-1), possibly all caps, section keywords
+        # Right-aligned numeric text (common price position)
+        if features.rel_x > 0.7 and features.digit_ratio > 0.5 and features.word_count <= 2:
+            return TextElementType.ITEM_PRICE, 0.85
+        
+        # SECTION HEADER DETECTION
         is_section_keyword = bool(text_words & self.SECTION_WORDS)
         section_conf = 0.0
         
+        # Strong section signals
         if is_section_keyword and features.word_count <= 4:
+            section_conf = 0.90
+        elif features.font_level == 0 and features.word_count <= 4 and not features.has_price:
             section_conf = 0.85
-        elif features.font_level == 0 and features.word_count <= 4:
-            section_conf = 0.80
         elif (features.is_all_caps and 
-              features.rel_height > 1.3 and 
-              features.gap_below > 1.5 and
-              features.word_count <= 4):
+              features.rel_height > 1.2 and 
+              features.gap_below > 1.2 and
+              features.word_count <= 5 and
+              not features.has_price):
+            section_conf = 0.80
+        # Centered text with large font
+        elif (0.3 < features.rel_x < 0.7 and
+              features.font_level <= 1 and
+              features.word_count <= 4 and
+              not features.has_price):
             section_conf = 0.75
         
         section_conf += prior_boost.get(TextElementType.SECTION_HEADER, 0.0)
         if section_conf >= 0.75:
             return TextElementType.SECTION_HEADER, min(section_conf, 0.95)
         
-        # Group header detection
-        # Medium font (level 1), category keywords
+        # GROUP HEADER DETECTION
         group_conf = 0.0
-        if features.has_category_word and features.word_count <= 3:
+        is_group_keyword = bool(text_words & self.CATEGORY_WORDS)
+        
+        if is_group_keyword and features.word_count <= 4 and not features.has_price:
+            group_conf = 0.85
+        elif features.font_level == 1 and features.word_count <= 4 and not features.has_price:
+            group_conf = 0.75
+        elif (features.has_category_word and 
+              features.word_count <= 3 and 
+              not features.has_price):
             group_conf = 0.80
-        elif features.font_level == 1 and features.word_count <= 4:
-            group_conf = 0.70
         
         group_conf += prior_boost.get(TextElementType.GROUP_HEADER, 0.0)
         if group_conf >= 0.70:
             return TextElementType.GROUP_HEADER, min(group_conf, 0.90)
         
-        # Description: long text, not caps, smaller font
-        if features.word_count > 6 and not features.is_all_caps:
+        # DESCRIPTION DETECTION
+        # Long text, not all caps, smaller font, multiple words
+        if (features.word_count > 6 and 
+            not features.is_all_caps and
+            features.font_level >= 2):
+            desc_conf = 0.80 + prior_boost.get(TextElementType.ITEM_DESCRIPTION, 0.0)
+            return TextElementType.ITEM_DESCRIPTION, min(desc_conf, 0.85)
+        
+        # Text starting with common description phrases
+        desc_starters = ['served', 'comes', 'includes', 'topped', 'made', 'with', 'our', 'a ']
+        if any(text_lower.startswith(s) for s in desc_starters) and features.word_count > 3:
             desc_conf = 0.75 + prior_boost.get(TextElementType.ITEM_DESCRIPTION, 0.0)
             return TextElementType.ITEM_DESCRIPTION, min(desc_conf, 0.85)
         
-        # Item name: default for regular text
-        if features.word_count >= 1 and features.digit_ratio < 0.5:
-            name_conf = 0.70 + prior_boost.get(TextElementType.ITEM_NAME, 0.0)
+        # FILTER OCR NOISE - reject obviously bad text
+        # Too short or too many unusual characters
+        if len(text) < 3:
+            return TextElementType.OTHER, 0.80
+        
+        # Single word with mixed case pattern like "RuX", "jOn" (OCR noise)
+        if features.word_count == 1 and len(text) <= 4:
+            # Check for noise patterns
+            has_mixed_inner = any(c.isupper() for c in text[1:-1]) if len(text) > 2 else False
+            if has_mixed_inner:
+                return TextElementType.OTHER, 0.85
+        
+        # All digits or mostly digits without price pattern (OCR noise like "1J00")
+        if features.digit_ratio > 0.6 and not features.has_price:
+            return TextElementType.OTHER, 0.80
+        
+        # Very short text with high upper ratio but not all caps
+        if len(text) <= 4 and features.upper_ratio > 0.5 and not text.isupper():
+            return TextElementType.OTHER, 0.75
+        
+        # Very short single words that aren't common food abbreviations
+        VALID_SHORT_WORDS = {
+            'tea', 'dal', 'dip', 'pie', 'ham', 'jam', 'egg', 'bun', 'nut', 'pop',
+            'ice', 'ale', 'rum', 'gin', 'veg', 'non', 'hot', 'dry', 'mix', 'raw',
+            'bbq', 'sub', 'fry', 'soy', 'cod', 'red', 'pav', 'naan', 'rice', 'soup',
+            'beef', 'pork', 'lamb', 'fish', 'crab', 'tuna', 'milk', 'cola', 'soda',
+            'wine', 'beer', 'coke', 'chai', 'roti', 'dosa', 'idli', 'upma', 'poha',
+        }
+        if features.word_count == 1 and len(text) <= 5:
+            if text_lower not in VALID_SHORT_WORDS:
+                # Not a recognized short food word - likely noise
+                return TextElementType.OTHER, 0.70
+        
+        # ITEM NAME DETECTION (default for remaining text)
+        # Be stricter: require reasonable text patterns
+        if features.word_count >= 1 and features.digit_ratio < 0.3:
+            # Additional checks for valid item names
+            # Must have at least one alphabetic character
+            if not any(c.isalpha() for c in text):
+                return TextElementType.OTHER, 0.80
+            # Must have reasonable letter ratio
+            alpha_ratio = sum(c.isalpha() for c in text) / max(len(text), 1)
+            if alpha_ratio < 0.5:
+                return TextElementType.OTHER, 0.75
+            
+            name_conf = 0.75 + prior_boost.get(TextElementType.ITEM_NAME, 0.0)
             return TextElementType.ITEM_NAME, min(name_conf, 0.85)
         
         return TextElementType.OTHER, 0.50

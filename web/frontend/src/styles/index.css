@@ -513,6 +513,137 @@ tr:hover td {
   font-size: 14px;
 }
 
+/* Fullscreen View */
+.fullscreen-view {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.fullscreen-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.fullscreen-image {
+  max-width: 90%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullscreen-image img {
+  max-width: 100%;
+  max-height: calc(100vh - 180px);
+  object-fit: contain;
+}
+
+.fullscreen-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #fff;
+  padding: 16px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 150ms ease;
+}
+
+.fullscreen-nav:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.fullscreen-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.fullscreen-nav.prev {
+  left: 24px;
+}
+
+.fullscreen-nav.next {
+  right: 24px;
+}
+
+.fullscreen-footer {
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.thumbnail-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  justify-content: center;
+  padding: 4px;
+}
+
+.thumbnail {
+  width: 80px;
+  height: 60px;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 150ms ease;
+  flex-shrink: 0;
+}
+
+.thumbnail:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.thumbnail.active {
+  border-color: #fff;
+}
+
+.thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Markdown Content */
+.markdown-content {
+  line-height: 1.7;
+  color: var(--color-gray-700);
+}
+
+.markdown-content p {
+  margin-bottom: 16px;
+}
+
+.markdown-content strong {
+  color: var(--color-gray-900);
+}
+
+.markdown-content table {
+  font-size: 13px;
+}
+
+.markdown-content table td:first-child {
+  font-weight: 500;
+}
+
 /* Utility Classes */
 .text-center { text-align: center; }
 .text-right { text-align: right; }

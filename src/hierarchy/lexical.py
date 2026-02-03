@@ -15,105 +15,155 @@ class LexicalPriors:
     Provides prior probability adjustments based on keyword matching.
     """
     
-    # Section-level keywords (top-level categories)
+    # Section-level keywords (top-level categories) - expanded
     SECTION_INDICATORS = {
         # Food categories
-        'appetizers', 'starters', 'mains', 'entrees', 'entrées',
-        'desserts', 'dessert', 'sides', 'salads', 'soups',
-        'breakfast', 'lunch', 'dinner', 'brunch',
-        'specials', 'specialties', 'chef',
-        'seafood', 'meat', 'poultry', 'vegetarian', 'vegan',
-        'pasta', 'pizza', 'sushi', 'curry', 'tandoor',
-        'grill', 'grilled', 'fried', 'roasted',
+        'appetizers', 'appetiser', 'appetisers', 'starters', 'starter',
+        'mains', 'main course', 'main courses', 'entrees', 'entrées', 'entree',
+        'desserts', 'dessert', 'sweets', 'puddings',
+        'sides', 'side dishes', 'accompaniments',
+        'salads', 'salad', 'soups', 'soup',
+        'breakfast', 'lunch', 'dinner', 'brunch', 'supper',
+        'specials', 'specialties', 'specialty', 'chef', "chef's",
+        'seafood', 'fish', 'meat', 'meats', 'poultry', 'chicken',
+        'vegetarian', 'vegan', 'veggie', 'vegetables',
+        'pasta', 'pastas', 'pizza', 'pizzas', 'flatbreads',
+        'sushi', 'sashimi', 'maki', 'nigiri',
+        'curry', 'curries', 'tandoor', 'tandoori',
+        'biryani', 'biryanis', 'rice', 'rices', 'pulao',
+        'noodles', 'noodle', 'chow', 'wok',
+        'grill', 'grills', 'grilled', 'bbq', 'barbeque',
+        'burgers', 'burger', 'sandwiches', 'sandwich', 'subs',
+        'wraps', 'wrap', 'rolls', 'roll',
+        'snacks', 'snack', 'finger food', 'finger foods', 'nibbles',
+        'mezze', 'tapas', 'small plates', 'sharing',
+        'platters', 'platter', 'combos', 'combo', 'meals',
         
         # Beverage categories
-        'beverages', 'drinks', 'cocktails', 'mocktails',
-        'wines', 'wine', 'beer', 'beers', 'spirits',
-        'whiskey', 'whisky', 'vodka', 'rum', 'gin', 'tequila',
-        'coffee', 'tea', 'juices', 'smoothies',
-        'soft drinks', 'sodas',
+        'beverages', 'beverage', 'drinks', 'drink',
+        'cocktails', 'cocktail', 'mocktails', 'mocktail',
+        'wines', 'wine', 'wine list', 'wine menu',
+        'beers', 'beer', 'draft', 'draught', 'on tap',
+        'spirits', 'spirit', 'liquors', 'liquor',
+        'whiskey', 'whisky', 'whiskies', 'vodka', 'vodkas',
+        'rum', 'rums', 'gin', 'gins', 'tequila',
+        'brandy', 'cognac', 'liqueurs', 'liqueur',
+        'coffee', 'coffees', 'espresso', 'tea', 'teas', 'chai',
+        'juices', 'juice', 'fresh juice', 'smoothies', 'smoothie',
+        'shakes', 'shake', 'milkshake', 'milkshakes',
+        'soft drinks', 'sodas', 'soda', 'refreshments',
+        'lemonade', 'lemonades', 'refreshers', 'coolers',
+        'hot drinks', 'cold drinks', 'non-alcoholic', 'alcohol-free',
+        'by the glass', 'by the bottle',
         
         # Other sections
-        'menu', 'carte', 'today',
+        'menu', 'carte', 'à la carte', 'a la carte',
+        'today', "today's", 'daily', 'seasonal',
+        'featured', 'recommended', 'popular', 'favorites',
+        'kids', 'children', "children's", "kids'", 'junior',
+        'extras', 'add-ons', 'additions', 'supplements',
     }
     
-    # Group-level keywords (sub-categories)
+    # Group-level keywords (sub-categories) - expanded
     GROUP_INDICATORS = {
         # Quality/type modifiers
         'domestic', 'imported', 'premium', 'deluxe', 'classic',
-        'house', 'signature', 'special', 'featured',
-        'single', 'double', 'large', 'small', 'regular',
+        'house', 'signature', 'special', 'featured', 'recommended',
+        'single', 'double', 'triple', 'regular', 'large', 'small', 'medium',
+        'half', 'full', 'quarter', 'whole', 'portion',
         
         # Dietary indicators
-        'vegetarian', 'vegan', 'gluten-free', 'gluten free',
-        'dairy-free', 'sugar-free', 'low-calorie',
-        'organic', 'fresh', 'homemade',
+        'vegetarian', 'vegan', 'veggie',
+        'gluten-free', 'gluten free', 'gf',
+        'dairy-free', 'dairy free', 'lactose-free',
+        'sugar-free', 'sugar free', 'low-calorie', 'diet',
+        'organic', 'fresh', 'homemade', 'house-made', 'handcrafted',
+        'healthy', 'light', 'lean',
         
         # Preparation styles
-        'grilled', 'fried', 'steamed', 'baked', 'raw',
-        'hot', 'cold', 'iced', 'frozen',
+        'grilled', 'fried', 'deep fried', 'steamed', 'baked', 'roasted',
+        'raw', 'smoked', 'cured', 'pickled', 'marinated',
+        'hot', 'cold', 'iced', 'frozen', 'chilled', 'warm',
+        'crispy', 'creamy', 'spicy', 'mild', 'medium',
         
         # Target audience
-        'kids', 'children', 'family',
+        'kids', 'children', 'family', 'sharing', 'for two',
         
-        # Regional
-        'indian', 'chinese', 'italian', 'mexican', 'thai',
-        'japanese', 'american', 'continental',
+        # Regional/cuisine types
+        'indian', 'chinese', 'italian', 'mexican', 'thai', 'japanese',
+        'american', 'continental', 'mediterranean', 'asian', 'european',
+        'korean', 'vietnamese', 'french', 'spanish', 'greek',
         
         # Drink specifics
-        'malts', 'malt', 'bourbon', 'scotch', 'tennessee',
-        'red', 'white', 'rosé', 'sparkling', 'champagne',
-        'draft', 'draught', 'bottled', 'canned',
-        'pint', 'glass', 'bottle', 'pitcher',
+        'malts', 'malt', 'single malt', 'blended',
+        'bourbon', 'scotch', 'irish', 'tennessee', 'rye',
+        'red', 'white', 'rosé', 'rose', 'sparkling', 'champagne', 'prosecco',
+        'draft', 'draught', 'bottled', 'canned', 'tap',
+        'pint', 'glass', 'bottle', 'pitcher', 'carafe', 'jug',
+        'shot', 'shots', 'neat', 'on the rocks',
+        
+        # Meal components
+        'toppings', 'extras', 'add-ons', 'sides',
+        'sauces', 'dressings', 'dips',
     }
     
-    # Price-related patterns
+    # Price-related patterns - expanded
     PRICE_PATTERNS = [
         r'^[\$£€₹¥]?\s*\d+(?:[.,]\d{1,2})?\s*$',  # $12.99, ₹500
         r'^\d{2,5}$',  # 500, 1200 (common in Asian menus)
         r'^[\$£€₹¥]\s*\d+',  # $12, ₹500
         r'^\d+\s*[\$£€₹¥]$',  # 12$, 500₹
-        r'^(?:Rs\.?|INR|USD|EUR)\s*\d+',  # Rs. 500
+        r'^(?:Rs\.?|INR|USD|EUR|GBP)\s*\d+',  # Rs. 500
+        r'^\d+\s*/-',  # 500/- (Indian style)
+        r'^\d+/\d+',  # 500/700 (price range)
+        r'^[\d,]+(?:\.\d{2})?$',  # 1,200.00
     ]
     
-    # Description indicators
+    # Description indicators - expanded
     DESCRIPTION_PATTERNS = [
         r'served with',
         r'comes with',
         r'includes',
         r'topped with',
         r'made with',
+        r'prepared with',
+        r'cooked in',
         r'fresh\s+\w+',
         r'homemade',
         r'our\s+\w+',
         r'a\s+\w+\s+of',
         r'blend\s+of',
+        r'choice of',
+        r'selection of',
+        r'assortment of',
+        r'combination of',
+        r'marinated in',
+        r'seasoned with',
+        r'garnished with',
+        r'drizzled with',
+        r'stuffed with',
+        r'layered with',
+        r'accompanied by',
+        r'paired with',
     ]
     
     def __init__(
         self,
-        section_boost: float = 0.3,
-        group_boost: float = 0.25,
-        price_boost: float = 0.4,
-        description_boost: float = 0.2,
+        section_boost: float = 0.35,
+        group_boost: float = 0.30,
+        price_boost: float = 0.45,
+        description_boost: float = 0.25,
     ):
         """
-        Initialize lexical priors.
-        
-        Parameters:
-        -----------
-        section_boost : Prior boost for section header detection
-        group_boost : Prior boost for group header detection
-        price_boost : Prior boost for price detection
-        description_boost : Prior boost for description detection
+        Initialize lexical priors with tuned boost values.
         """
         self.section_boost = section_boost
         self.group_boost = group_boost
         self.price_boost = price_boost
         self.description_boost = description_boost
         
-        # Compile patterns
-        self.price_patterns = [re.compile(p) for p in self.PRICE_PATTERNS]
+        # Compile patterns for speed
+        self.price_patterns = [re.compile(p, re.IGNORECASE) for p in self.PRICE_PATTERNS]
         self.description_patterns = [
             re.compile(p, re.IGNORECASE) for p in self.DESCRIPTION_PATTERNS
         ]
@@ -124,19 +174,12 @@ class LexicalPriors:
     ) -> dict[TextElementType, float]:
         """
         Compute prior probability adjustments for each label.
-        
-        Parameters:
-        -----------
-        text : Text content to analyze
-        
-        Returns:
-        --------
-        Dict mapping TextElementType to prior adjustment (0.0 = no change)
         """
         priors = {t: 0.0 for t in TextElementType}
         
         text_lower = text.lower().strip()
-        words = set(text_lower.split())
+        # Use word boundary matching for better accuracy
+        words = set(re.findall(r'\b\w+\b', text_lower))
         
         # Check for section indicators
         if words & self.SECTION_INDICATORS:
@@ -165,18 +208,26 @@ class LexicalPriors:
         if text.isupper() and len(words) <= 4 and len(text) > 3:
             priors[TextElementType.SECTION_HEADER] = max(
                 priors[TextElementType.SECTION_HEADER],
-                0.2
+                0.25
             )
         
-        # Very short text with digits -> likely price
-        if len(text) <= 8 and sum(c.isdigit() for c in text) / max(len(text), 1) > 0.5:
+        # Very short text with high digit ratio -> likely price
+        digit_ratio = sum(c.isdigit() for c in text) / max(len(text), 1)
+        if len(text) <= 10 and digit_ratio > 0.4:
             priors[TextElementType.ITEM_PRICE] = max(
                 priors[TextElementType.ITEM_PRICE],
-                0.3
+                0.35
             )
         
         # Long text -> likely description or item name
         if len(words) > 6:
+            priors[TextElementType.ITEM_DESCRIPTION] = max(
+                priors[TextElementType.ITEM_DESCRIPTION],
+                0.20
+            )
+        
+        # Text ending with ellipsis or continuation -> description
+        if text.endswith('...') or text.endswith('…'):
             priors[TextElementType.ITEM_DESCRIPTION] = max(
                 priors[TextElementType.ITEM_DESCRIPTION],
                 0.15
@@ -189,21 +240,9 @@ class LexicalPriors:
         text: str,
         threshold: float = 0.2,
     ) -> Optional[TextElementType]:
-        """
-        Get most likely label if prior is strong enough.
-        
-        Parameters:
-        -----------
-        text : Text to analyze
-        threshold : Minimum prior to return a label
-        
-        Returns:
-        --------
-        Most likely TextElementType or None if no strong signal
-        """
+        """Get most likely label if prior is strong enough."""
         priors = self.compute_prior(text)
         
-        # Find max prior
         best_label = max(priors, key=priors.get)
         best_prior = priors[best_label]
         
@@ -218,10 +257,10 @@ class LexicalPriors:
     
     def is_section_keyword(self, text: str) -> bool:
         """Check if text contains section keywords."""
-        words = set(text.lower().split())
+        words = set(re.findall(r'\b\w+\b', text.lower()))
         return bool(words & self.SECTION_INDICATORS)
     
     def is_group_keyword(self, text: str) -> bool:
         """Check if text contains group keywords."""
-        words = set(text.lower().split())
+        words = set(re.findall(r'\b\w+\b', text.lower()))
         return bool(words & self.GROUP_INDICATORS)
